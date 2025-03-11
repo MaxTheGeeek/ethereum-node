@@ -5,6 +5,7 @@
     <div class="col-start-1 col-end-7 row-start-1 row-span-1 flex justify-start items-center">
       <span class="text-sm font-semibold text-gray-200 uppercase">{{ $t("multiServer.saveServerCon") }}</span>
     </div>
+
     <div class="col-start-7 col-span-full row-start-1 row-span-1 flex justify-start items-center relative">
       <label for="Search" class="sr-only"> {{ $t("multiServer.serch") }} </label>
 
@@ -34,20 +35,27 @@
       </span>
     </div>
 
+    <!-- Server list section -->
     <div
       class="w-full h-full max-h-[300px] col-start-1 col-span-full row-start-2 row-end-11 overflow-x-hidden overflow-y-auto flex flex-col justify-start items-center p-1 bg-black rounded-md space-y-2 border border-neutral-500"
     >
-      <ServerRow
-        v-for="(server, index) in getFilteredServers"
-        :key="server.name"
-        :idx="index"
-        :server="server"
-        @select-server="selectServer"
-        @quick-login="quickLogin"
-        @mouseenter="footerStore.cursorLocation = `${server.name}`"
-        @mouseleave="footerStore.cursorLocation = ''"
-      />
+      <template v-if="isLoading">
+        <ServerSkeleton v-for="skeleton in skeletons" :key="skeleton" />
+      </template>
+      <template v-else>
+        <ServerRow
+          v-for="(server, index) in getFilteredServers"
+          :key="server.name"
+          :idx="index"
+          :server="server"
+          @select-server="selectServer"
+          @quick-login="quickLogin"
+          @mouseenter="footerStore.cursorLocation = `${server.name}`"
+          @mouseleave="footerStore.cursorLocation = ''"
+        />
+      </template>
     </div>
+
     <div class="h-full col-start-1 col-span-full row-start-11 row-span-2 grid grid-cols-12 justify-center items-start">
       <div class="group relative col-start-5 col-end-7 row-start-11 row-span-2 flex justify-center">
         <button
@@ -67,7 +75,6 @@
 
       <input ref="fileInput" type="file" class="hidden" accept=".zip" @change="importConnections" />
 
-      <!-- Export Button with Tooltip -->
       <div class="group relative col-start-7 col-end-9 row-start-11 row-span-2 flex justify-center">
         <button
           class="w-[50px] h-[50px] bg-gray-200 rounded-md justify-self-center flex justify-center items-center shadow-lg shadow-black active:shadow-none active:scale-95 cursor-pointer transition-all duration-200 ease-in-out hover:bg-[#336666] text-gray-800 hover:text-gray-100"
@@ -84,7 +91,6 @@
         </span>
       </div>
 
-      <!-- New Button with Tooltip -->
       <div class="group relative col-start-9 col-end-11 row-start-11 row-span-2 flex justify-center">
         <button
           class="w-[50px] h-[50px] bg-gray-200 rounded-md justify-self-center flex justify-center items-center shadow-lg shadow-black active:shadow-none active:scale-95 cursor-pointer p-2 transition-all duration-200 ease-in-out hover:bg-[#336666] text-gray-800 hover:text-gray-100 m-0"
@@ -101,7 +107,6 @@
         </span>
       </div>
 
-      <!-- Stereum Plus Button -->
       <div class="group relative col-start-11 col-end-13 row-start-11 row-span-2 flex justify-center">
         <button
           class="w-[50px] h-[50px] bg-gray-200 rounded-md justify-self-center flex justify-center items-center shadow-lg shadow-black active:shadow-none active:scale-95 cursor-pointer p-2 transition-all duration-200 ease-in-out hover:bg-[#336666] text-gray-800 hover:text-gray-100 m-0"
@@ -118,6 +123,7 @@
         </span>
       </div>
     </div>
+
     <div
       v-if="isAlertActive"
       class="absolute bottom-0 inset-x-4 mt-2 bg-red-500 text-sm text-white rounded-lg p-4"
@@ -129,17 +135,19 @@
     </div>
   </div>
 </template>
+
 <script setup>
 import i18n from "@/includes/i18n";
 import ControlService from "@/store/ControlService";
 import { useServers } from "@/store/servers";
 import { useControlStore } from "@/store/theControl";
 import { useFooter } from "@/store/theFooter";
-import { onMounted, ref, watch, computed, watchEffect } from "vue";
+import { onMounted, ref, watch, computed, watchEffect, onUnmounted } from "vue";
 import ServerRow from "./ServerRow.vue";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import { useDeepClone } from "@/composables/utils";
+import ServerSkeleton from "./ServerSkeleton.vue";
 
 const t = i18n.global.t;
 
@@ -151,28 +159,82 @@ const controlStore = useControlStore();
 const searchQuery = ref("");
 const searchInputRef = ref(null);
 const isAlertActive = ref(false);
+const skeletons = ref([1, 2, 3, 4, 5]);
+const isLoading = ref(true);
+const configLastModified = ref(null);
+const pollingInterval = ref(null);
 
 const getFilteredServers = computed(() => {
   if (!searchQuery.value) {
-    return serverStore.savedServers?.savedConnections;
+    return serverStore.savedServers?.savedConnections || [];
   }
 
-  return serverStore.savedServers.savedConnections.filter((server) => server.name.toLowerCase().includes(searchQuery.value.toLowerCase()));
+  return (serverStore.savedServers?.savedConnections || []).filter((server) =>
+    server.name.toLowerCase().includes(searchQuery.value.toLowerCase())
+  );
 });
 
 watch(
   () => serverStore.refreshServers,
   async (refreshTrigger, oldRefreshTrigger) => {
     if (refreshTrigger !== oldRefreshTrigger) {
+      isLoading.value = true;
       await loadStoredConnections();
+      setTimeout(() => {
+        isLoading.value = false;
+      }, 3000);
     }
   }
 );
 
+const checkConfigChanges = async () => {
+  try {
+    const config = await ControlService.readConfig();
+
+    if (!configLastModified.value) {
+      configLastModified.value = JSON.stringify(config);
+      return;
+    }
+
+    const currentConfigString = JSON.stringify(config);
+    if (currentConfigString !== configLastModified.value) {
+      configLastModified.value = currentConfigString;
+      isLoading.value = true;
+      serverStore.savedServers = config;
+      serverStore.selectedServerConnection = serverStore.savedServers?.savedConnections?.find(
+        (item) => item.host === controlStore.ipAddress
+      );
+      setTimeout(() => {
+        isLoading.value = false;
+      }, 2000);
+    }
+  } catch (error) {
+    console.error("Error checking config changes:", error);
+  }
+};
+
 onMounted(async () => {
+  isLoading.value = true;
+
   await loadStoredConnections();
+
+  const config = await ControlService.readConfig();
+  configLastModified.value = JSON.stringify(config);
+
+  pollingInterval.value = setInterval(checkConfigChanges, 5000);
+
+  setTimeout(() => {
+    isLoading.value = false;
+  }, 3000);
+
   if (searchInputRef.value) {
     searchInputRef.value.focus();
+  }
+});
+
+onUnmounted(() => {
+  if (pollingInterval.value) {
+    clearInterval(pollingInterval.value);
   }
 });
 
@@ -210,6 +272,8 @@ const importConnections = async (event) => {
     return;
   }
 
+  isLoading.value = true;
+
   const zip = new JSZip();
   try {
     const connect = await file.arrayBuffer();
@@ -218,6 +282,7 @@ const importConnections = async (event) => {
     const connectionsFile = zipContent.file("connections.json");
     if (!connectionsFile) {
       isAlertActive.value = true;
+      isLoading.value = false;
       return;
     }
 
@@ -241,15 +306,20 @@ const importConnections = async (event) => {
       };
 
       await ControlService.writeConfig(conf);
+
+      configLastModified.value = JSON.stringify(conf);
     } else {
       isAlertActive.value = true;
-      console.error("Invalid or empty connections data.");
     }
 
-    await loadStoredConnections(serverStore.savedServers);
-    isAlertActive.value = false;
+    await loadStoredConnections();
+    setTimeout(() => {
+      isLoading.value = false;
+      isAlertActive.value = false;
+    }, 3000);
   } catch (error) {
     console.error("An error occurred:", error);
+    isLoading.value = false;
   }
 };
 
@@ -302,24 +372,20 @@ const serverLogin = () => {
   background-color: transparent;
 }
 
-/* Auto-hide behavior */
 .scrollbar-container {
   overflow-y: auto;
 }
 
-/* Hide scrollbar when not hovering */
 .scrollbar-container:not(:hover)::-webkit-scrollbar {
   width: 0;
-  display: none; /* Hide completely */
+  display: none;
 }
 
-/* For Firefox */
 .scrollbar-container {
   scrollbar-width: thin;
   scrollbar-color: #7d838a transparent;
 }
 
-/* Hide scrollbar when not hovering for Firefox */
 .scrollbar-container:not(:hover) {
   scrollbar-width: none;
 }
