@@ -39,8 +39,6 @@ const props = defineProps({
     default: 0,
   },
 });
-
-console.log(props);
 </script>
 <style scoped>
 .crown {
