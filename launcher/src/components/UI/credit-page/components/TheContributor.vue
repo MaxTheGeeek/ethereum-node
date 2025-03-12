@@ -7,7 +7,7 @@
     <div class="contributor-name">
       <span>{{ props.name }}</span>
       <span v-if="props.rank" class="rank"># {{ props.rank }}</span>
-      <small v-if="props.score" class="score">SCORE: {{ props.score }} </small>
+      <small v-if="props?.score" class="score">SCORE: {{ props.score }} </small>
     </div>
   </div>
 </template>
@@ -31,14 +31,16 @@ const props = defineProps({
   rank: {
     type: Number,
     required: true,
-    default: null,
+    default: 0,
   },
   score: {
     type: Number,
     required: true,
-    default: null,
+    default: 0,
   },
 });
+
+console.log(props);
 </script>
 <style scoped>
 .crown {

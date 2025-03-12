@@ -13,8 +13,8 @@
         :name="result.name"
         :avatar="result.avatar"
         :crown="headerStore.choosedCreditType !== 'translation' && index === 0"
-        :rank="headerStore.choosedCreditType !== 'translation' ? index + 1 : ''"
-        :score="result.score"
+        :rank="headerStore.choosedCreditType !== 'translation' ? index + 1 : 0"
+        :score="result.score ? result.score : 0"
       />
     </div>
   </div>
