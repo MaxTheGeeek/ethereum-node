@@ -13,15 +13,28 @@
     </div>
     <ul
       v-if="dropdownVisible"
-      class="dropdown-audio-output w-72 h-fit absolute z-50 bg-teal-600 text-wrap text-sm font-serif font-medium p-1 top-14 right-4 rounded-md text-[#e6e4e4]"
+      class="dropdown-audio-output w-72 h-fit absolute z-50 bg-teal-600 text-wrap text-sm font-serif font-medium p-1 top-18 right-4 rounded-md text-[#e6e4e4]"
+      @mouseleave="closeDropdown"
     >
+      <li class="cursor-pointer mt-1 p-1 rounded-md" @click="selectDevice({ deviceId: 'default', label: 'Default Device' })">
+        Default Device
+      </li>
+
       <li
         v-for="device in audioOutputDevices"
         :key="device.deviceId"
         class="cursor-pointer mt-1 p-1 rounded-md"
         @click="selectDevice(device)"
       >
-        {{ device.label }}
+        {{ device.label || `Device ${device.deviceId.substring(0, 5)}...` }}
+      </li>
+
+      <li v-if="audioOutputDevices.length === 0 && !isLoading" class="mt-1 p-1 text-yellow-200">No audio output devices found</li>
+
+      <li v-if="isLoading" class="mt-1 p-1">Loading devices...</li>
+
+      <li v-if="errorMessage" class="mt-1 p-1 text-red-200">
+        {{ errorMessage }}
       </li>
     </ul>
   </div>
@@ -34,34 +47,82 @@ import { useLangStore } from "@/store/languages";
 const langStore = useLangStore();
 
 const audioOutputDevices = ref([]);
-const selectedDevice = ref({});
+const selectedDevice = ref({ deviceId: "default", label: "Default Device" });
 const dropdownVisible = ref(false);
+const isLoading = ref(false);
+const errorMessage = ref("");
 
 const toggleDropdown = () => {
   dropdownVisible.value = !dropdownVisible.value;
+
+  if (dropdownVisible.value) {
+    getAudioDevices();
+  }
+};
+
+const closeDropdown = () => {
+  dropdownVisible.value = false;
 };
 
 const selectDevice = (device) => {
   selectedDevice.value = device;
   langStore.selectedDeviceId = device.deviceId;
-  toggleDropdown();
+
+  closeDropdown();
 };
 
 onMounted(() => {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+    console.error("This browser doesn't support the Audio Output Devices API");
+    errorMessage.value = "Your browser doesn't support audio device selection";
+    return;
+  }
+
   getAudioDevices();
 });
 
 const getAudioDevices = async () => {
-  try {
-    await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    audioOutputDevices.value = devices.filter((device) => device.kind === "audiooutput");
+  isLoading.value = true;
+  errorMessage.value = "";
 
-    if (audioOutputDevices.value.length > 0) {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+
+    const outputDevices = devices.filter((device) => device.kind === "audiooutput");
+    const hasLabels = outputDevices.some((device) => device.label);
+
+    if (!hasLabels) {
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+      const devicesWithLabels = await navigator.mediaDevices.enumerateDevices();
+      audioOutputDevices.value = devicesWithLabels.filter((device) => device.kind === "audiooutput");
+    } else {
+      audioOutputDevices.value = outputDevices;
+    }
+
+    if (audioOutputDevices.value.length > 0 && !langStore.selectedDeviceId) {
       langStore.selectedDeviceId = audioOutputDevices.value[0].deviceId;
+      selectedDevice.value = audioOutputDevices.value[0];
+    }
+
+    if (langStore.selectedDeviceId) {
+      const storedDevice = audioOutputDevices.value.find((device) => device.deviceId === langStore.selectedDeviceId);
+
+      if (storedDevice) {
+        selectedDevice.value = storedDevice;
+      }
     }
   } catch (error) {
     console.error("Error accessing media devices:", error);
+
+    if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
+      errorMessage.value = "Permission denied. Please allow microphone access.";
+    } else if (error.name === "NotFoundError") {
+      errorMessage.value = "No audio devices found.";
+    } else {
+      errorMessage.value = "Error accessing audio devices.";
+    }
+  } finally {
+    isLoading.value = false;
   }
 };
 </script>
@@ -86,7 +147,6 @@ const getAudioDevices = async () => {
 
 .dropdown-audio-output span:hover {
   background: #a1c1ad;
-
   cursor: pointer;
 }
 .dropdown-audio-output li:hover {
